@@ -2290,15 +2290,23 @@ async function runQuery(raw) {
     const ans = await sampleFn.json(
       'A driver wants to park near a place in Manhattan (this map covers Manhattan from the Battery up to 80th St, river to river). Identify the place and the street corner nearest its entrance.\n' +
       `Place: "${q.place.slice(0, 200)}"\n` +
-      'Reply with only JSON: {"found": true, "name": "Balthazar", "address": "80 Spring St", "street1": "Spring St", "street2": "Crosby St"}.\n' +
+      'Reply with only JSON: {"found": true, "name": "Balthazar", "borough": "Manhattan", "address": "80 Spring St", "street1": "Spring St", "street2": "Crosby St"}.\n' +
       '"street1" and "street2" are two streets that really cross at that corner, written out in full (for example "E 72nd St", "Lexington Ave", "6th Ave", "West Broadway"). ' +
       'If you are not confident the place exists and where it is, reply {"found": false}.',
       { modelTier: 'quick', signal: askCtl.signal });
     if (!ans?.found) { setNote(`Claude couldn't place "${q.place}". Try cross streets or an address, or tap the map.`, true); return; }
     const s1 = String(ans.street1 || '').slice(0, 60), s2 = String(ans.street2 || '').slice(0, 60);
+    const borough = String(ans.borough || '').slice(0, 40);
+    // Brooklyn has a Broadway too: anything outside Manhattan is off this map
+    if ((borough && !/manhattan|new york/i.test(borough)) || /\b(brooklyn|queens|bronx|staten island|new jersey|nj|jersey city|hoboken|long island city|astoria|williamsburg)\b/i.test(String(ans.address || ''))) {
+      setNote(`${ans.name || q.place} looks like it's ${borough && !/manhattan|new york/i.test(borough) ? 'in ' + borough : 'outside Manhattan'}, so it isn't on this map (it covers Manhattan from the Battery to 80th St).`, true);
+      return;
+    }
     const am = String(ans.address || '').match(/^\s*(\d{1,5})(?:-\d{1,3})?\s+([^,]+)/);
     const corner = s1 && s2 ? crossPt(s1, s2) : null;
-    const p = (am && addressPt(+am[1], am[2])) || corner;
+    const ap = am ? addressPt(+am[1], am[2]) : null;
+    // the house number is more precise, unless it lands far from the corner (then trust the corner)
+    const p = ap && (!corner || Math.hypot(ap.x - corner.x, ap.y - corner.y) < 1200) ? ap : corner;
     const where = corner ? corner.label : [s1, s2].filter(Boolean).join(' & ');
     if (!p) { setNote(`${ans.name || q.place} looks like it's ${where ? 'at ' + where : 'nearby'}, which isn't on this map (it covers the Battery to 80th St).`, true); return; }
     if (outsideFeet(p.x, p.y) > 1400) { setNote(`${ans.name || q.place} looks like it's near ${where}, outside this map (the Battery to 80th St).`, true); return; }
