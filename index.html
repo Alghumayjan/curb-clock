@@ -109,6 +109,10 @@ button, input, select { font: inherit; color: inherit; }
 .btn.ghost:hover { background: var(--chip); filter: none; }
 .btn.small { height: 30px; padding: 0 10px; font-size: 13px; }
 .btn[disabled] { opacity: 0.5; cursor: default; }
+.iconbtn { width: 42px; padding: 0; flex: none; display: grid; place-items: center; }
+.iconbtn svg { width: 19px; height: 19px; }
+.dvhead > div { flex: 1; min-width: 0; }
+.dvhead .recenter { flex: none; align-self: flex-start; height: 34px; }
 .asknote { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); min-height: 1.45em; }
 .asknote b { color: var(--ink); font-weight: 600; }
 .asknote.err { color: var(--no-text); }
@@ -393,10 +397,12 @@ input[type="range"] { width: 100%; margin: 6px 0 0; accent-color: var(--accent);
       <label for="ask" class="lbl">Where and when?</label>
       <div class="askrow">
         <input id="ask" name="ask" type="text" placeholder="72nd &amp; Lex at 3pm for 2 hrs" enterkeyhint="go" spellcheck="false" aria-autocomplete="list" aria-controls="suggest">
+        <button type="button" class="btn ghost iconbtn" id="askHere" aria-label="Use my current location" title="Use my current location"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3 3 10.6l7.4 2.1 2.1 7.3z" fill="currentColor"></path></svg></button>
         <button type="submit" class="btn" id="askGo">Go</button>
       </div>
       <ul id="suggest" class="suggest" role="listbox" hidden></ul>
       <p id="askNote" class="asknote" aria-live="polite">Try:
+        <button type="button" class="ex" data-q="near me">Near me now</button>
         <button type="button" class="ex" data-q="Frick Collection at 2pm">Frick at 2pm</button>
         <button type="button" class="ex" data-q="Spring &amp; Mercer at 8pm">Spring &amp; Mercer at 8pm</button>
         <button type="button" class="ex" data-q="740 Park Ave at 4:30pm">740 Park Ave</button>
@@ -447,6 +453,7 @@ input[type="range"] { width: 100%; margin: 6px 0 0; accent-color: var(--accent);
       <button type="button" id="zin" aria-label="Zoom in">+</button>
       <button type="button" id="zout" aria-label="Zoom out">−</button>
       <div class="gap"></div>
+      <button type="button" id="goMe" aria-label="Use my current location" title="Use my current location"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 3 3 10.6l7.4 2.1 2.1 7.3z" fill="currentColor"></path></svg></button>
       <button type="button" id="goDest" aria-label="Center on destination"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2"></circle><circle cx="10" cy="10" r="2.2" fill="currentColor"></circle><path d="M10 1v3M10 16v3M1 10h3M16 10h3" stroke="currentColor" stroke-width="2"></path></svg></button>
       <button type="button" id="goH" class="txt" aria-label="Show Harlem and East Harlem, 100th to 130th St">HAR</button>
       <button type="button" id="goE" class="txt" aria-label="Show the Upper East Side, 59th to 96th St">UES</button>
@@ -461,6 +468,7 @@ input[type="range"] { width: 100%; margin: 6px 0 0; accent-color: var(--accent);
     <section class="overlay drive" id="drive" hidden aria-labelledby="dvStreet">
       <div class="dvhead">
         <div><p class="eyebrow" id="dvEyebrow">Drive mode</p><h3 id="dvStreet">Where are you starting?</h3><p class="dvsub" id="dvSub">Use GPS, or tap "Set my spot" and then tap the map.</p></div>
+        <button type="button" class="btn small recenter" id="dvRecenter" hidden>Re-center</button>
         <button type="button" class="x" id="dvClose" aria-label="Exit drive mode">×</button>
       </div>
       <div class="dvhere" id="dvHere" hidden></div>
@@ -1254,6 +1262,9 @@ function parseQuery(raw) {
     out.stay = Math.max(15, Math.round(mins / 15) * 15);
     cut(m[0]);
   }
+  // "near me", "my location": where the phone is
+  const HERE_RE = /\b(near\s+me|nearby|close\s+to\s+me|around\s+me|my\s+(current\s+)?location|current\s+location|where\s+i\s+am(\s+now)?|right\s+here|from\s+here|here)\b/g;
+  if (HERE_RE.test(q)) { out.here = true; q = q.replace(HERE_RE, ' '); }
   // street cleaning: "9:30-11 cleaning spots", "cleaning 11:30am to 1pm", "alternate side at 8:30"
   const CLEAN_RE = /\b(street[\s-]*clean(ing)?|clean(ing)?|sweep(ing|er)?|alternate[\s-]*side( parking)?|alt[\s-]*side|asp)\b/g;
   if (CLEAN_RE.test(q)) {
@@ -1412,6 +1423,7 @@ function cleanSet() {
   return w ? w.zones : new Set();
 }
 function fmtWin(w) { // "9:30–11 AM", "11:30 AM–1 PM"
+  if (w.s === 0 && w.e >= DAY) return 'All day';
   const part = (m) => { m = ((m % DAY) + DAY) % DAY; const h = Math.floor(m / 60), mi = m % 60; return { t: `${h % 12 || 12}${mi ? ':' + String(mi).padStart(2, '0') : ''}`, ap: h < 12 ? 'AM' : 'PM' }; };
   const a = part(w.s), b = part(w.e);
   return a.ap === b.ap ? `${a.t}–${b.t} ${b.ap}` : `${a.t} ${a.ap}–${b.t} ${b.ap}`;
@@ -1723,6 +1735,13 @@ function draw() {
   // screen-space overlays
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
   drawLabels();
+  if (me && !(drive.on && drive.mode === 'gps')) {
+    const [mx, my] = toScreen(me.x, me.y);
+    const ra = Math.min(140, me.acc * view.k);
+    if (ra > 9) { g.beginPath(); g.arc(mx, my, ra, 0, Math.PI * 2); g.fillStyle = colors.meter; g.globalAlpha = 0.12; g.fill(); g.globalAlpha = 1; }
+    g.beginPath(); g.arc(mx, my, 7.5, 0, Math.PI * 2); g.fillStyle = colors.pinRing; g.fill();
+    g.beginPath(); g.arc(mx, my, 5.5, 0, Math.PI * 2); g.fillStyle = colors.meter; g.fill();
+  }
   if (d) {
     const [sx, sy] = toScreen(d.x, d.y);
     g.beginPath(); g.arc(sx, sy, 9, 0, Math.PI * 2); g.fillStyle = colors.pinRing; g.fill();
@@ -1882,7 +1901,8 @@ canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
   hideHint();
   if (pointers.size === 1) { drag = { x: e.offsetX, y: e.offsetY, cx: view.cx, cy: view.cy }; moved = 0; downAt = performance.now(); }
-  else if (pointers.size === 2) {
+  if (drive.on && !drive.follow) bumpResume();
+  if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: view.k, world: toWorld((a.x + b.x) / 2, (a.y + b.y) / 2) };
     drag = null; moved = 99;
@@ -1896,6 +1916,7 @@ canvas.addEventListener('pointermove', (e) => {
     const dd = Math.hypot(a.x - b.x, a.y - b.y);
     view.k = pinch.k * dd / (pinch.d || 1);
     clampView();
+    if (followingCar()) { followNow(); return; }
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     view.cx = pinch.world[0] - (mx - W / 2) / view.k; view.cy = pinch.world[1] + (my - H / 2) / view.k;
     clampView(); requestDraw();
@@ -1903,6 +1924,7 @@ canvas.addEventListener('pointermove', (e) => {
     const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y;
     moved = Math.max(moved, Math.hypot(dx, dy));
     if (moved > 4) { canvas.classList.add('dragging'); $('#maptip').hidden = true; }
+    if (moved > 8 && followingCar()) pauseFollow(); // looking around: stop following until Re-center
     view.cx = drag.cx - dx / view.k; view.cy = drag.cy + dy / view.k;
     clampView(); requestDraw();
   }
@@ -1926,16 +1948,19 @@ canvas.addEventListener('keydown', (e) => {
   else if (e.key === '+' || e.key === '=') return zoomAt(W / 2, H / 2, 1.4);
   else if (e.key === '-' || e.key === '_') return zoomAt(W / 2, H / 2, 1 / 1.4);
   else return;
+  if (followingCar()) pauseFollow();
   e.preventDefault(); clampView(); requestDraw();
 });
 function zoomAt(sx, sy, f) {
+  if (followingCar()) { view.k *= f; followNow(); return; } // keep the car in place while following it
   const [wx, wy] = toWorld(sx, sy);
   view.k *= f; clampView();
   view.cx = wx - (sx - W / 2) / view.k; view.cy = wy + (sy - H / 2) / view.k;
   clampView(); requestDraw();
 }
 let anim = 0;
-function flyTo(x, y, k) {
+function flyTo(x, y, k, keepFollow) {
+  if (!keepFollow && followingCar()) pauseFollow(); // the map is going somewhere else
   cancelAnimationFrame(anim);
   const s = { ...view }, e = { cx: x, cy: y, k: k || view.k };
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2012,6 +2037,7 @@ function hideHint() { clearTimeout(hintTimer); $('#hint').classList.add('gone');
 
 $('#zin').onclick = () => zoomAt(W / 2, H / 2, 1.5);
 $('#zout').onclick = () => zoomAt(W / 2, H / 2, 1 / 1.5);
+$('#goMe').onclick = () => nearMe();
 $('#goDest').onclick = () => state.dest && flyTo(state.dest.x, state.dest.y, Math.max(view.k, 0.32));
 $('#goE').onclick = () => { const v = fitView(D.meta.regions.ues || FOCUS); flyTo(v.cx, v.cy, v.k); };
 $('#goH').onclick = () => { const r = D.meta.regions.har; if (!r) return; const v = fitView(r); flyTo(v.cx, v.cy, v.k); };
@@ -2412,14 +2438,13 @@ function renderCleanSel() {
   if (!wins.length) {
     cleanSel.append(opt('none', c.asp ? `Cleaning suspended ${fmtDate(state.date)}${c.name ? ` (${c.name})` : ''}` : `No street cleaning ${fmtDate(state.date)}`, true));
   } else {
-    const here = document.createElement('optgroup'); here.label = 'Near your destination (10-min walk)';
-    const away = document.createElement('optgroup'); away.label = 'Elsewhere on the map';
+    // every window swept that day, in time order, with how many spaces it frees near the destination
+    const grp = document.createElement('optgroup'); grp.label = `Swept ${fmtDate(state.date)}`;
     for (const w of wins) {
       const cars = nearCars.get(w.key) || 0;
-      if (cars) here.append(opt(w.key, `${fmtWin(w)} · ≈${cars.toLocaleString('en-US')} spaces`)); else away.append(opt(w.key, fmtWin(w)));
+      grp.append(opt(w.key, `${fmtWin(w)} · ${cars ? `≈${cars.toLocaleString('en-US')} spaces near you` : 'none near you'}`));
     }
-    if (here.children.length) cleanSel.append(here);
-    if (away.children.length) cleanSel.append(away);
+    cleanSel.append(grp);
   }
   if (state.clean && ![...cleanSel.options].some((o) => o.value === state.clean.key)) cleanSel.append(opt(state.clean.key, `${fmtWin(state.clean)} · none ${fmtDate(state.date)}`));
   cleanSel.value = state.clean ? state.clean.key : '';
@@ -2430,7 +2455,7 @@ function renderCleanUI() {
   if (w) { $('#cleanChipTxt').textContent = `Swept ${fmtWin(w)} · ${fmtDate(state.date)}`; hideHint(); }
   $('#cleanHelp').textContent = w
     ? `Showing only curbs swept ${fmtWin(w)}. They open at ${fmtClock(w.e)}, when cleaning ends, so the time is set to then.`
-    : 'Pick a cleaning window to see only the curbs swept then. They all open up when it ends.';
+    : `Pick a window swept on ${fmtDate(state.date)} to see only those curbs; they all open up when it ends. The menu lists only that day's windows.`;
   measureOverlays();
 }
 function setClean(w) {
@@ -2510,8 +2535,30 @@ function setNote(text, err, html) {
   if (html) note.innerHTML = html; else note.textContent = text;
 }
 $('#askForm').addEventListener('submit', (e) => { e.preventDefault(); hideSuggest(); runQuery(askIn.value); });
+const nearMe = () => { askIn.value = 'Near me'; hideSuggest(); runQuery('near me'); };
+$('#askHere').onclick = nearMe;
 note.addEventListener('click', (e) => { const b = e.target.closest('.ex'); if (b) { askIn.value = b.dataset.q; runQuery(b.dataset.q); } });
 let askCtl = null;
+// the phone's location, once: { x, y, acc (ft) } in map feet
+let me = null;
+function locateMe() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject({ code: 'none' }); return; }
+    navigator.geolocation.getCurrentPosition((p) => {
+      const [x, y] = llToMap(p.coords.latitude, p.coords.longitude);
+      resolve({ x, y, acc: (p.coords.accuracy || 0) * 3.28 });
+    }, (err) => reject({ code: err && err.code }), { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
+  });
+}
+function locateError(e) {
+  if (e.code === 'none') return "This browser can't share your location. Type where you are instead.";
+  if (e.code === 1) {
+    return window.self !== window.top
+      ? "Location is blocked inside Claude's viewer. Open the page as a normal website (alghumayjan.github.io/curb-clock) to use it, or type where you are."
+      : 'Location permission is off for this page. Allow it in your browser settings, or type where you are.';
+  }
+  return "Couldn't get your location (the signal may be weak). Try again, or type where you are.";
+}
 async function runQuery(raw) {
   if (!raw.trim()) { askIn.focus(); return; }
   const q = parseQuery(raw);
@@ -2531,7 +2578,26 @@ async function runQuery(raw) {
     if (state.sel >= 0 && state.clean && !cleanSet().has(state.sel)) { state.sel = -1; renderDetail(); }
     renderCleanUI();
   };
-  let place = q.place ? resolvePlace(q.place) : null;
+  let place = null;
+  if (q.here) {
+    setNote('Finding your location…');
+    $('#askGo').disabled = true; $('#askHere').disabled = true;
+    try {
+      const p = await locateMe();
+      me = { ...p, t: Date.now() };
+      const c = nearestCrossing(p.x, p.y);
+      const acc = p.acc > 400 ? `accurate to about ${Math.round(p.acc / 100) * 100} ft` : '';
+      place = { x: p.x, y: p.y, label: 'Your location', sub: [c ? `near ${c}` : '', acc].filter(Boolean).join(', ') };
+      if (q.time == null && q.date == null && !q.clean && !state.clean) { // "near me" with no time means now
+        const n = nyNow(), t = Math.min(1425, Math.ceil(n.min / 15) * 15);
+        if (n.iso !== state.date) { ensureDayOption(n.iso); daySel.value = n.iso; setDate(n.iso); renderDayNote(); }
+        state.t0 = t; timeIn.value = t; $('#timeOut').textContent = fmtClock(t); parts.push(`arriving now (${fmtClock(t)})`);
+      }
+    } catch (e) {
+      applyClean(); refreshAll(); setNote(locateError(e), true);
+      return;
+    } finally { $('#askGo').disabled = false; $('#askHere').disabled = false; }
+  } else place = q.place ? resolvePlace(q.place) : null;
   if (place && place.outside) { applyClean(); refreshAll(); setNote(`${place.label} is outside this map, which covers Manhattan from the Battery to 130th St. ${parts.length ? 'Updated: ' + parts.join(', ') + '.' : ''}`, true); return; }
   if (place && outsideFeet(place.x, place.y) > 1100) {
     applyClean(); refreshAll();
@@ -2657,7 +2723,7 @@ function pointAt(L, s) {
 // every curb zone already knows (from the data build) the road it lines and its side of it
 ZONES.forEach((z, zi) => { if (z.lk >= 0 && LINKS[z.lk]) LINKS[z.lk].zones.push(zi); });
 
-const drive = { on: false, mode: null, pos: null, plan: null, meters: false, voice: true, skip: new Set(), setting: false, watch: null, timer: 0, follow: true, lastLink: -1, spoken: '', lastFix: null, wake: null };
+const drive = { on: false, mode: null, pos: null, plan: null, meters: false, voice: true, skip: new Set(), setting: false, watch: null, timer: 0, follow: true, lastLink: -1, spoken: '', lastFix: null, wake: null, resumeT: 0, gpsZoomed: false };
 const skey = (lk, dir) => lk * 2 + (dir === 1 ? 0 : 1);
 const allowed = (L, dir) => L.flag === 0 || L.flag === dir;
 function zoneOk(zi) { const c = ZST[zi]; return c === FREE || (drive.meters && c === METER); }
@@ -2948,7 +3014,7 @@ function setStartAt(x, y) {
   drive.mode = 'manual'; drive.skip.clear();
   drive.pos = { lk: m.lk, dir: m.dir, s: m.s };
   setDvMsg('');
-  guide(true); follow();
+  guide(true); resumeFollowAt(true);
 }
 function stepBlock() {
   const pos = drive.pos, plan = drive.plan;
@@ -2960,7 +3026,7 @@ function stepBlock() {
     if (!e) return;
     drive.pos = { lk: e.lk, dir: e.dir, s: 0 };
   }
-  guide(true); follow();
+  guide(true); resumeFollowAt(false);
 }
 function noSpotHere() {
   const pos = drive.pos; if (!pos) return;
@@ -2975,10 +3041,35 @@ function flipDir() {
   drive.pos = { lk: pos.lk, dir: -pos.dir, s: L.len - pos.s };
   guide(true);
 }
-function follow() {
+// Following the car: the zoom stays wherever the driver puts it (only a fresh start zooms in to street
+// level); dragging the map pauses following until Re-center (live GPS resumes by itself after 15 s).
+function follow(first) {
   const c = carPose(); if (!c || !drive.follow) return;
-  const k = Math.max(view.k, 0.45), f = followCenter(c, k);
-  flyTo(f.cx, f.cy, k);
+  const k = first ? Math.max(view.k, 0.45) : view.k, f = followCenter(c, k);
+  flyTo(f.cx, f.cy, k, true);
+}
+function followingCar() { return drive.on && drive.follow && !!drive.pos; }
+function followNow() {
+  const c = carPose(); if (!c) return;
+  clampView();
+  const f = followCenter(c, view.k); view.cx = f.cx; view.cy = f.cy; clampView(); requestDraw();
+}
+function pauseFollow() {
+  if (!drive.on || !drive.pos) return;
+  cancelAnimationFrame(anim);
+  drive.follow = false;
+  $('#dvRecenter').hidden = false;
+  bumpResume();
+}
+function bumpResume() {
+  clearTimeout(drive.resumeT);
+  if (drive.mode === 'gps' && !drive.follow) drive.resumeT = setTimeout(resumeFollow, 15000);
+}
+function resumeFollow() {
+  clearTimeout(drive.resumeT);
+  drive.follow = true;
+  $('#dvRecenter').hidden = true;
+  follow();
 }
 
 // preview: drive the planned route at a brisk simulated pace
@@ -2992,7 +3083,7 @@ function startPreview() {
     drive.pos = { lk: m.lk, dir: m.dir, s: m.s };
   }
   drive.mode = 'preview'; drive.skip.clear(); drive.spoken = '';
-  guide(true); follow();
+  guide(true); resumeFollowAt(true);
   let last = performance.now();
   const tick = (now) => {
     if (drive.mode !== 'preview') return;
@@ -3010,7 +3101,7 @@ function startPreview() {
       guide(true);
     }
     remindTurn();
-    const c = carPose(), f = followCenter(c, view.k); view.cx = f.cx; view.cy = f.cy; clampView(); requestDraw();
+    if (drive.follow) followNow(); else requestDraw();
     drive.timer = requestAnimationFrame(tick);
   };
   drive.timer = requestAnimationFrame(tick);
@@ -3035,7 +3126,8 @@ function startGps() {
   const nowNy = nyNow();
   if (nowNy.iso !== state.date) { ensureDayOption(nowNy.iso); daySel.value = nowNy.iso; setDate(nowNy.iso); renderDayNote(); }
   setTime(Math.min(1425, Math.floor(nowNy.min / 15) * 15));
-  drive.mode = 'gps'; drive.skip.clear(); drive.lastFix = null;
+  drive.mode = 'gps'; drive.skip.clear(); drive.lastFix = null; drive.gpsZoomed = false;
+  drive.follow = true; $('#dvRecenter').hidden = true; clearTimeout(drive.resumeT);
   clearInterval(drive.clock);
   drive.clock = setInterval(() => {
     if (drive.mode !== 'gps') { clearInterval(drive.clock); return; }
@@ -3078,8 +3170,12 @@ function onFix(p) {
   drive.pendingKey = null;
   drive.pos = { lk: m.lk, dir: m.dir, s: m.s };
   if (newLink) guide(true); else { guide(false); remindTurn(); }
-  const c = carPose(); if (drive.follow && c) { view.k = Math.max(view.k, 0.45); const f = followCenter(c, view.k); view.cx = f.cx; view.cy = f.cy; clampView(); requestDraw(); }
+  if (drive.follow && carPose()) {
+    if (!drive.gpsZoomed) { view.k = Math.max(view.k, 0.45); drive.gpsZoomed = true; } // street level once, then the driver's zoom
+    followNow();
+  } else requestDraw();
 }
+function resumeFollowAt(first) { clearTimeout(drive.resumeT); drive.follow = true; $('#dvRecenter').hidden = true; follow(first); }
 function stopModes() {
   clearInterval(drive.clock);
   if (drive.watch != null) { try { navigator.geolocation.clearWatch(drive.watch); } catch (e) { /* ignore */ } drive.watch = null; }
@@ -3107,6 +3203,7 @@ function openDrive() {
 }
 function closeDrive() {
   stopModes();
+  clearTimeout(drive.resumeT); drive.follow = true; $('#dvRecenter').hidden = true;
   drive.on = false; drive.setting = false; canvas.classList.remove('setting');
   $('#drive').hidden = true;
   document.querySelector('.app').classList.remove('driving');
@@ -3114,6 +3211,7 @@ function closeDrive() {
 }
 $('#driveBtn').onclick = openDrive;
 $('#dvClose').onclick = closeDrive;
+$('#dvRecenter').onclick = resumeFollow;
 $('#dvGps').onclick = () => { if (drive.mode !== 'gps') unlockVoice('Starting live guidance.'); startGps(); };
 $('#dvPreview').onclick = () => { if (drive.mode !== 'preview') unlockVoice('Starting the preview.'); startPreview(); };
 $('#dvSet').onclick = () => {
@@ -3152,7 +3250,7 @@ resize();
 })();
 renderChart();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measureCache.clear(); requestDraw(); renderChart(); });
-window.__curb = { cleanWindows, setClean, pickCleanWindow, fmtWin, HIDE, renderCleanSel, LANDMARKS, landmarkPt, crossPt, addressPt, streetCands, nearestCrossing, outsideFeet, STREET_Y, drive, LINKS, planFrom, maneuvers, spacesOn, setStartAt, stepBlock, llToMap, state, ZONES, FACES, RULES, ZST, evalStay, statusAt, mustMove, resolvePlace, parseQuery, setDate, recomputeStatuses, dayCtx, select, setDest, view, draw };
+window.__curb = { followingCar, pauseFollow, resumeFollow, zoomAt, get me() { return me; }, cleanWindows, setClean, pickCleanWindow, fmtWin, HIDE, renderCleanSel, LANDMARKS, landmarkPt, crossPt, addressPt, streetCands, nearestCrossing, outsideFeet, STREET_Y, drive, LINKS, planFrom, maneuvers, spacesOn, setStartAt, stepBlock, llToMap, state, ZONES, FACES, RULES, ZST, evalStay, statusAt, mustMove, resolvePlace, parseQuery, setDate, recomputeStatuses, dayCtx, select, setDest, view, draw };
 })();
 </script>
 </body></html>
